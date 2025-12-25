@@ -7,11 +7,12 @@ function App() {
   const [socket, setSocket] = useState(null);
   const [username, setUsername] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loginError, setLoginError] = useState('');
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState('');
-  const [contacts, setContacts] = useState([]);
+  const [connections, setConnections] = useState([]);
   const [toasts, setToasts] = useState([]);
   const messagesEndRef = useRef(null);
 
@@ -34,7 +35,8 @@ function App() {
     if (!socket) return;
 
     socket.on('onlineUsers', (users) => {
-      setOnlineUsers(users.filter(u => u !== username));
+      // Filter to only show connections who are online
+      setOnlineUsers(users.filter(u => u !== username && connections.includes(u)));
     });
 
     socket.on('newMessage', (msg) => {
@@ -51,13 +53,8 @@ function App() {
       }
       
       // Show notification if message is from someone else
-      if (msg.sender !== username) {
+      if (msg.sender !== username && connections.includes(msg.sender)) {
         showToast(`Message from ${msg.sender}`, msg.text);
-        // Add to contacts if not there
-        setContacts(prev => {
-          if (!prev.includes(msg.sender)) return [...prev, msg.sender];
-          return prev;
-        });
       }
     });
 
@@ -65,7 +62,7 @@ function App() {
       socket.off('onlineUsers');
       socket.off('newMessage');
     };
-  }, [socket, username, selectedUser, showToast]);
+  }, [socket, username, selectedUser, showToast, connections]);
 
   // Scroll to bottom
   useEffect(() => {
@@ -78,25 +75,43 @@ function App() {
     
     fetch(`${SOCKET_SERVER}/api/messages/${username}/${selectedUser}`)
       .then(res => res.json())
-      .then(data => setMessages(data))
-      .catch(err => console.error('Error:', err));
+      .then(data => {
+        if (Array.isArray(data)) {
+          setMessages(data);
+        } else {
+          setMessages([]);
+        }
+      })
+      .catch(err => {
+        console.error('Error:', err);
+        setMessages([]);
+      });
   }, [selectedUser, username]);
 
-  // Load contacts on login
-  useEffect(() => {
-    if (!isLoggedIn || !username) return;
-    
-    fetch(`${SOCKET_SERVER}/api/contacts/${username}`)
-      .then(res => res.json())
-      .then(data => setContacts(data))
-      .catch(err => console.error('Error:', err));
-  }, [isLoggedIn, username]);
-
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    if (username.trim() && socket) {
-      socket.emit('join', username);
-      setIsLoggedIn(true);
+    if (!username.trim()) return;
+    
+    try {
+      const res = await fetch(`${SOCKET_SERVER}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.trim() })
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        setUsername(data.username);
+        setConnections(Array.isArray(data.connections) ? data.connections : []);
+        socket.emit('join', data.username);
+        setIsLoggedIn(true);
+        setLoginError('');
+      } else {
+        setLoginError('User not found! Try: satya, ramu, raju, or karan');
+      }
+    } catch (err) {
+      setLoginError('Connection error. Is the server running?');
     }
   };
 
@@ -118,14 +133,12 @@ function App() {
     });
   };
 
-  // Get all users to show (online + contacts)
-  const allUsers = [...new Set([...onlineUsers, ...contacts])].filter(u => u !== username);
-
   if (!isLoggedIn) {
     return (
       <div className="app-container">
         <div className="login-container">
           <h1>💬 Private Chat</h1>
+          <p className="login-hint">Available users: satya, ramu, raju, karan</p>
           <form onSubmit={handleLogin}>
             <input
               type="text"
@@ -136,6 +149,7 @@ function App() {
             />
             <button type="submit">Join</button>
           </form>
+          {loginError && <p className="login-error">{loginError}</p>}
         </div>
       </div>
     );
@@ -160,11 +174,11 @@ function App() {
             <h3>👤 {username}</h3>
           </div>
           <div className="user-list">
-            <p className="section-label">Users</p>
-            {allUsers.length === 0 ? (
-              <p className="no-users">No users yet</p>
+            <p className="section-label">My Connections</p>
+            {connections.length === 0 ? (
+              <p className="no-users">No connections</p>
             ) : (
-              allUsers.map(user => (
+              connections.map(user => (
                 <div
                   key={user}
                   className={`user-item ${selectedUser === user ? 'selected' : ''}`}
@@ -172,6 +186,7 @@ function App() {
                 >
                   <span className={`status-dot ${onlineUsers.includes(user) ? 'online' : 'offline'}`}></span>
                   {user}
+                  {onlineUsers.includes(user) && <span className="online-badge">online</span>}
                 </div>
               ))
             )}

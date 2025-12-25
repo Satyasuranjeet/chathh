@@ -25,8 +25,50 @@ mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch(err => console.error('MongoDB connection error:', err));
 
+// ========== USER DATA ==========
+// Predefined users and their connections (friends list)
+const users = {
+  satya: { password: '1234', connections: ['ramu', 'raju', 'karan'] },
+  ramu: { password: '1234', connections: ['satya', 'karan'] },
+  raju: { password: '1234', connections: ['satya', 'karan'] },
+  karan: { password: '1234', connections: ['satya', 'ramu', 'raju'] }
+};
+
 // Store online users: { username: socketId }
 const onlineUsers = {};
+
+// Get all users list
+app.get('/api/users', (req, res) => {
+  res.json(Object.keys(users));
+});
+
+// Login - verify user exists
+app.post('/api/login', (req, res) => {
+  const { username } = req.body;
+  const lowerUsername = username.toLowerCase();
+  
+  if (users[lowerUsername]) {
+    res.json({ 
+      success: true, 
+      username: lowerUsername,
+      connections: users[lowerUsername].connections 
+    });
+  } else {
+    res.status(401).json({ success: false, error: 'User not found' });
+  }
+});
+
+// Get user's connections
+app.get('/api/connections/:username', (req, res) => {
+  const { username } = req.params;
+  const lowerUsername = username.toLowerCase();
+  
+  if (users[lowerUsername]) {
+    res.json(users[lowerUsername].connections);
+  } else {
+    res.status(404).json({ error: 'User not found' });
+  }
+});
 
 // Get conversation between two users
 app.get('/api/messages/:user1/:user2', async (req, res) => {
